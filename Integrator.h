@@ -70,7 +70,10 @@ public:
     /// Store (posterior of model - pedestal) / (approx posterior)
     void CalculateObservables(const std::vector<double>& pars)
     //    { GetObservable(0) = exp(fModel.LogEval(pars) - fModel.GetStatistics().probability_mean - GetLogProbx(GetCurrentChain())); }
-    { GetObservable(0) = exp(fModel.LogEval(pars) - fModel.GetStatistics().probability_mean - LogEval(pars)); }
+    {
+        fModel.UpdateChainIndex(GetCurrentChain());
+        GetObservable(0) = exp(fModel.LogEval(pars) - fModel.GetStatistics().probability_mean - LogEval(pars));
+    }
 
     const BCModel& model() const
     { return fModel; }
