@@ -30,16 +30,25 @@ public:
     /// Constructor
     Integrator(BCModel& model) : BCModel(model.GetName() + "_integrator"),
                                  fModel(model),
-                                 fApproxPosteriorInverseCovariance(fModel.GetNParameters()),
-                                 fApproxPosteriorCoverianceDeterminant(0)
+                                 fApproxPosteriorInverseCovariance(fModel.GetNFreeParameters())
     {
         // get covariance as ROOT matrix
-        TMatrixDSym C(fModel.GetNParameters());
-        for (size_t i = 0; i < fModel.GetNParameters(); ++i)
-            for (size_t j = 0; j < fModel.GetNParameters(); ++j)
-                C[i][j] = fModel.GetStatistics().covariance[i][j];
+        TMatrixDSym C(fModel.GetNFreeParameters());
+        size_t I = 0;
+        for (size_t i = 0; i < fModel.GetNParameters(); ++i) {
+            if (fModel.GetParameter(i).Fixed()) continue;
+            size_t J = 0;
+            for (size_t j = 0; j < fModel.GetNParameters(); ++j) {
+                if (fModel.GetParameter(j).Fixed()) continue;
+                C[I][J] = fModel.GetStatistics().covariance[i][j];
+                ++J;
+            }
+            ++I;
+        }
+        
         // invert it, storing the determinant
-        fApproxPosteriorInverseCovariance = C.Invert(&fApproxPosteriorCoverianceDeterminant);
+        double det;
+        fApproxPosteriorInverseCovariance = C.Invert(&det);
 
         // Copy model's paramters
         fParameters = fModel.GetParameters();
@@ -54,22 +63,23 @@ public:
     // \return flat
     double LogLikelihood(const std::vector<double>& pars)
     {
-        // x[i] := pars[i] - mean[i]
+        // x[i] := pars[i] - mean[i], if par(i) not fixed
         std::vector<double> x;
-        x.reserve(pars.size());
-        std::transform(pars.begin(), pars.end(), fModel.GetStatistics().mean.begin(), std::back_inserter(x), std::minus<double>());
+        x.reserve(GetNFreeParameters());
+        for (size_t i = 0; i < GetNParameters(); ++i)
+            if (!GetParameter(i).Fixed())
+                x.push_back(pars[i] - fModel.GetStatistics().mean[i]);
 
         double LL = 0;
         for (size_t i = 0; i < x.size(); ++i) {
             for (size_t j = 0; j < x.size(); ++j)
                 LL += x[i] * fApproxPosteriorInverseCovariance[i][j] * x[j];
         }
-        return -0.5 * LL - 0.5 * x.size() * log(2. * TMath::Pi()) - 0.5 * log(fApproxPosteriorCoverianceDeterminant);
+        return -0.5 * LL;
     }
 
     /// Store (posterior of model - pedestal) / (approx posterior)
     void CalculateObservables(const std::vector<double>& pars)
-    //    { GetObservable(0) = exp(fModel.LogEval(pars) - fModel.GetStatistics().probability_mean - GetLogProbx(GetCurrentChain())); }
     {
         fModel.UpdateChainIndex(GetCurrentChain());
         GetObservable(0) = exp(fModel.LogEval(pars) - fModel.GetStatistics().probability_mean - LogEval(pars));
@@ -82,14 +92,10 @@ public:
     const TMatrixDSym& GetApproxPosteriorInverseCovariance() const
     { return fApproxPosteriorInverseCovariance; }
 
-    /// \return determinant of covariance of approx posterior
-    double GetApproxPosteriorCovarianceDeterminant() const
-    { return fApproxPosteriorCoverianceDeterminant; }
-
     // \return integral
     double GetIntegral(double prior_integral = 1) const
     { return GetStatistics().mean[GetNParameters()] * exp(fModel.GetStatistics().probability_mean) * prior_integral; }
-
+    
     // \return uncertainty on integral
     double GetIntegralUncertainty(double prior_integral = 1) const
     { return sqrt(GetStatistics().variance[GetNParameters()] / GetStatistics().n_samples) * exp(fModel.GetStatistics().probability_mean) * prior_integral; }
@@ -100,20 +106,25 @@ protected:
 
     TMatrixDSym fApproxPosteriorInverseCovariance;
 
-    double fApproxPosteriorCoverianceDeterminant;
 };
 
 /// \return integral of a multivariate Gaussian
 /// \param mean mean of Gaussian
 /// \param Cinv inverse of covariance matrix of Gaussian
-/// \param Cdet determinant of covariance matrix of Gaussian
 /// \param xmin lower limit of integral range
 /// \param xmax upper limit of integral range
-inline double multivariate_gaussian_integral(const std::vector<double>& mean,
-                                             const TMatrixDSym& Cinv, double Cdet,
-                                             const std::vector<double>& xmin,
-                                             const std::vector<double>& xmax)
+inline double multivariate_gaussian_integral(const std::vector<double>& mean, const TMatrixDSym& Cinv,
+                                             const std::vector<double>& xmin, const std::vector<double>& xmax)
 {
+    if (static_cast<int>(mean.size()) < Cinv.GetNrows())
+        throw;
+    
+    if (static_cast<int>(xmin.size()) < Cinv.GetNrows())
+        throw;
+
+    if (static_cast<int>(xmax.size()) < Cinv.GetNrows())
+        throw;
+    
     // get Cholesky decomposition
     //   Cinv = Lc Lc^T
     TDecompChol chol_dec;
@@ -146,7 +157,7 @@ inline double multivariate_gaussian_integral(const std::vector<double>& mean,
     std::vector<double> diag_max;
     std::vector<double> diag_mean;
 
-    double integral = pow(4., -0.5 * L.GetNrows()) / sqrt(Cdet);
+    double integral = pow(TMath::Pi() / 2., 0.5 * L.GetNrows());
     for (int i = 0; i < L.GetNrows(); ++i) {
 
         // transform into diagonal basis
@@ -173,19 +184,26 @@ inline double approx_posterior_integral(const Integrator& m,
                                         std::vector<double> xmax = std::vector<double>())
 {
     if (xmin.empty()) {
-        xmin.reserve(m.GetNParameters());
+        xmin.reserve(m.GetNFreeParameters());
         for (size_t i = 0; i < m.GetNParameters(); ++i)
-            xmin.push_back(m.GetParameter(i).GetLowerLimit());
+            if (!m.GetParameter(i).Fixed())
+                xmin.push_back(m.GetParameter(i).GetLowerLimit());
     }
 
     if (xmax.empty()) {
-        xmax.reserve(m.GetNParameters());
+        xmax.reserve(m.GetNFreeParameters());
         for (size_t i = 0; i < m.GetNParameters(); ++i)
-            xmax.push_back(m.GetParameter(i).GetUpperLimit());
+            if (!m.GetParameter(i).Fixed())
+                xmax.push_back(m.GetParameter(i).GetUpperLimit());
     }
 
-    return multivariate_gaussian_integral(m.model().GetStatistics().mean, m.GetApproxPosteriorInverseCovariance(),
-                                          m.GetApproxPosteriorCovarianceDeterminant(), xmin, xmax);
+    std::vector<double> mean;
+    mean.reserve(m.GetNFreeParameters());
+    for (size_t i = 0; i < m.GetNParameters(); ++i)
+        if (!m.GetParameter(i).Fixed())
+            mean.push_back(m.model().GetStatistics().mean[i]);
+    
+    return multivariate_gaussian_integral(mean, m.GetApproxPosteriorInverseCovariance(), xmin, xmax);
 }
 
 

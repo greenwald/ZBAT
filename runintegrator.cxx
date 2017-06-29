@@ -36,6 +36,8 @@ int main()
     BCLog::SetLogLevel(BCLog::nothing);
 
     TestModel test("test_model", 10);
+    test.GetParameter(0).Fix(0);
+    test.GetParameter(5).Fix(0);
     test.SetPrecision(BCEngineMCMC::kMedium);
     test.SetNIterationsRun(1e5);
     test.SetFlagFillHistograms(false);
