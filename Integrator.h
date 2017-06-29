@@ -114,7 +114,8 @@ protected:
 /// \param xmin lower limit of integral range
 /// \param xmax upper limit of integral range
 inline double multivariate_gaussian_integral(const std::vector<double>& mean, const TMatrixDSym& Cinv,
-                                             const std::vector<double>& xmin, const std::vector<double>& xmax)
+                                             const std::vector<double>& xmin, const std::vector<double>& xmax,
+                                             double epsilon = 1.e-3)
 {
     if (static_cast<int>(mean.size()) < Cinv.GetNrows())
         throw;
@@ -129,7 +130,19 @@ inline double multivariate_gaussian_integral(const std::vector<double>& mean, co
     //   Cinv = Lc Lc^T
     TDecompChol chol_dec;
     chol_dec.SetMatrix(Cinv);
-    chol_dec.Decompose();
+
+    // try to decompose
+    if(!chol_dec.Decompose()) {
+        // if failed, nudge diagonal elements
+        TMatrixDSym Cinv_nudged = Cinv;
+        for (int i = 0; i < Cinv_nudged.GetNrows(); ++i)
+            Cinv_nudged[i][i] *= 1 + epsilon;
+        // try again
+        if (!chol_dec.Decompose())
+            // if fails still, throw
+            throw;
+    }
+        
     // ROOT gives upper-triangular matrix
     TMatrixD L = chol_dec.GetU();
     // We need the lower-triangular one
