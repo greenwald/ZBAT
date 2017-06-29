@@ -39,7 +39,7 @@ int main()
     test.GetParameter(0).Fix(0);
     test.GetParameter(5).Fix(0);
     test.SetPrecision(BCEngineMCMC::kMedium);
-    test.SetNIterationsRun(1e5);
+    test.SetNIterationsRun(5e5);
     test.SetFlagFillHistograms(false);
     test.MarginalizeAll(BCIntegrate::kMargMetropolis);
     // test.PrintSummary();
@@ -63,7 +63,7 @@ int main()
               << " (" << (100. * int_test.GetIntegralUncertainty() / int_test.GetIntegral()) << " %)"
               << "\tin [" << int_test.GetIntegral(sampling_integral) - 3 * int_test.GetIntegralUncertainty(sampling_integral)
               << ", " << int_test.GetIntegral(sampling_integral) + 3 * int_test.GetIntegralUncertainty(sampling_integral)
-              << "] with 95% credibility"
+              << "] with 99.7% credibility"
               << std::endl;
 
     // BCLog::SetLogLevel(BCLog::detail);
