@@ -41,6 +41,7 @@ public:
             for (size_t j = 0; j < fModel.GetNParameters(); ++j) {
                 if (fModel.GetParameter(j).Fixed()) continue;
                 C[I][J] = fModel.GetStatistics().covariance[i][j];
+                C[J][I] = fModel.GetStatistics().covariance[i][j];
                 ++J;
             }
             ++I;
@@ -72,8 +73,9 @@ public:
 
         double LL = 0;
         for (size_t i = 0; i < x.size(); ++i) {
-            for (size_t j = 0; j < x.size(); ++j)
-                LL += x[i] * fApproxPosteriorInverseCovariance[i][j] * x[j];
+            LL += pow(x[i], 2) * fApproxPosteriorInverseCovariance[i][i];
+            for (size_t j = i + 1; j < x.size(); ++j)
+                LL += 2 * x[i] * fApproxPosteriorInverseCovariance[i][j] * x[j];
         }
         return -0.5 * LL;
     }
